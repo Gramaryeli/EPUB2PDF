@@ -1,16 +1,10 @@
-# 忽略 PyCharm 的配置文件夹
-.idea/
-
-# 忽略 Python 编译产生的缓存
 __pycache__/
-*.py[cod]
-
-# 忽略虚拟环境 (非常重要！这个有几百兆，绝对不能上传)
+*.pyc
 venv/
-
-# 忽略打包生成的文件夹 (exe文件我们会单独发Release，不传代码库)
+.idea/
+.vscode/
 build/
 dist/
-
-# 忽略打包配置文件 (可选，但一般 spec 文件可以上传作为记录)
-# *.spec
+*.spec
+*_分卷/
+*.pdf
