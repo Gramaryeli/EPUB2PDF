@@ -1,4 +1,4 @@
 # config.py
 
 LARGE_FILE_THRESHOLD_MB = 20
-APP_VERSION = "v3.6.1"
+APP_VERSION = "v3.7.1"

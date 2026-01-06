@@ -1,7 +1,7 @@
 # gui/main_window.py
-# Version: v3.6.1_Batch_Final
+# Version: v3.7.1_Feedback_Fix
 # Last Updated: 2026-01-06
-# Description: 批量转换完整版；集成Listbox队列；极简结果汇报；UI布局修复。
+# Description: [v3.7.1] 修复分割任务的控制台反馈，确保任务结束有明确提示。
 
 import os
 import threading
@@ -22,7 +22,7 @@ from core.splitter import PDFSplitterEngine
 class AppGUI:
     def __init__(self, root):
         self.root = root
-        self.root.title(f"EPUB2PDF {APP_VERSION} (批量增强版)")
+        self.root.title(f"EPUB2PDF {APP_VERSION} (Pro)")
         self.root.geometry("800x850")
 
         self.sys_stats = tk.StringVar(value="CPU: 0% | RAM: 0%")
@@ -40,7 +40,8 @@ class AppGUI:
         self._start_sys_monitor()
         self.current_engine = None
         self.is_running = False
-        self.batch_file_paths = []  # 批量队列
+        self.batch_file_paths = []
+        self.is_counting = False  # 统计锁
 
     def _start_sys_monitor(self):
         top_bar = ttk.Frame(self.root, padding=2)
@@ -63,7 +64,7 @@ class AppGUI:
         t.start()
 
     # =========================================================================
-    # [UI] 批量转换界面 (Listbox + 按钮组)
+    # Tab 1: EPUB 转 PDF (保持 v3.6.1 代码)
     # =========================================================================
     def _init_convert_tab(self):
         self.cv_paper = tk.StringVar(value="A4")
@@ -132,10 +133,10 @@ class AppGUI:
         self.cv_log = tk.Text(g3, height=12, font=("Consolas", 9));
         self.cv_log.pack(fill="both", expand=True)
 
-        self.btn_start = ttk.Button(frame, text="🚀 开始批量转换", command=self.on_click_start)
+        self.btn_start = ttk.Button(frame, text="🚀 开始转换", command=self.on_click_start)
         self.btn_start.pack(pady=10, ipadx=20, ipady=5)
 
-    # --- 队列操作 ---
+    # --- Tab 1 逻辑 ---
     def cv_add_files(self):
         files = filedialog.askopenfilenames(filetypes=[("EPUB", "*.epub")])
         for f in files:
@@ -168,9 +169,6 @@ class AppGUI:
                                                       f"[{datetime.datetime.now().strftime('%H:%M:%S')}] {msg}\n") or self.cv_log.see(
             "end"))
 
-    # =========================================================================
-    # [核心] 批量调度逻辑 (含容错与状态隔离)
-    # =========================================================================
     def on_click_start(self):
         if self.is_running:
             if messagebox.askyesno("确认", "确定要中止所有任务吗？"):
@@ -201,14 +199,13 @@ class AppGUI:
             filename = os.path.basename(src)
             current_idx = idx + 1
 
-            # 更新总状态 (引擎不覆盖此状态)
             self.root.after(0,
                             lambda s=f"[进度 {current_idx}/{total_files}] 正在处理: {filename}": self.cv_status.set(s))
             self.cv_log_msg(f"\n--------- 处理第 {current_idx} / {total_files} 本: {filename} ---------")
 
             try:
                 is_monolithic, report = ConverterEngine.analyze_structure(src)
-                self.cv_log_msg(report.split('\n')[-2])  # 简略日志
+                self.cv_log_msg(report.split('\n')[-2])
 
                 final_mode = self.cv_mode.get()
                 if is_monolithic and final_mode != 'single':
@@ -220,7 +217,6 @@ class AppGUI:
                             'margin_lr': self.cv_ml.get(), 'margin_tb': self.cv_mt.get(), 'mode': final_mode,
                             'auto_merge': self.cv_auto_merge.get()}
 
-                # 传入 None 给 status_cb，防止引擎覆盖总进度
                 cb = CallbackManager(self.cv_prog, None, self.cv_log_msg)
                 self.current_engine = ConverterEngine(src, out, settings, cb)
 
@@ -259,96 +255,222 @@ class AppGUI:
         self.btn_start.config(state="normal", text="🚀 开始批量转换")
         self.cv_status.set("批量任务结束")
 
-        # 极简弹窗
         summary = f"批量任务完成\n\n共处理: {total}\n✅ 成功: {success}\n❌ 失败: {fail}"
         self.cv_log_msg("=" * 30)
         self.cv_log_msg(summary.replace("\n", " | "))
 
         messagebox.showinfo("汇报", summary)
 
-    # === 工具箱 (保持原样) ===
+    # =========================================================================
+    # Tab 2: PDF 工具箱
+    # =========================================================================
     def _init_merge_tab(self):
-        # 此处代码与之前完全一致，为节省篇幅，请保持您原有的工具箱代码
-        # 只要确保 PDF 工具箱功能 (统计/拆分/合并) 存在即可
-        frame = self.tab_merge;
-        pad = {'padx': 10, 'pady': 5}
-        paned = tk.PanedWindow(frame, orient="horizontal");
-        paned.pack(fill="both", expand=True, **pad)
-        left = ttk.LabelFrame(paned, text="批量合并", padding=5);
-        paned.add(left, width=320)
-        self.mg_list = tk.Listbox(left, selectmode="extended");
-        self.mg_list.pack(fill="both", expand=True, pady=5)
-        bf = ttk.Frame(left);
-        bf.pack(fill="x")
-        ttk.Button(bf, text="添加", command=self.mg_add).pack(side="left", fill="x", expand=True)
-        ttk.Button(bf, text="删除", command=self.mg_del).pack(side="left", fill="x", expand=True)
-        ttk.Button(left, text="开始合并", command=self.mg_start).pack(fill="x", pady=5)
-        right = ttk.Frame(paned);
-        paned.add(right)
-        g_tools = ttk.LabelFrame(right, text="常用工具", padding=10);
-        g_tools.pack(fill="x", pady=5)
-        self.tl_file = tk.StringVar();
-        fr = ttk.Frame(g_tools);
-        fr.pack(fill="x", pady=5)
-        ttk.Entry(fr, textvariable=self.tl_file).pack(side="left", fill="x", expand=True)
-        ttk.Button(fr, text="浏览",
-                   command=lambda: self.tl_file.set(filedialog.askopenfilename(filetypes=[("PDF", "*.pdf")]))).pack(
-            side="left", padx=5)
-        ttk.Separator(g_tools, orient="horizontal").pack(fill="x", pady=10)
-        ttk.Button(g_tools, text="📊 统计全文字数", command=self.tl_count_words).pack(fill="x", pady=5)
-        ttk.Separator(g_tools, orient="horizontal").pack(fill="x", pady=10)
-        ttk.Button(g_tools, text="📑 按目录拆分...", command=self.tl_split_toc).pack(fill="x", pady=5)
-        self.tl_log = tk.Text(right, height=15, font=("Consolas", 9));
-        self.tl_log.pack(fill="both", expand=True, pady=5)
         self.mg_files = []
+        self.tl_file = tk.StringVar()
+        self.tl_mode = tk.StringVar(value="toc")
+        self.tl_word_limit = tk.DoubleVar(value=2.0)
 
-    # 工具箱辅助方法 (保持原样)
+        frame = self.tab_merge
+        pad = {'padx': 10, 'pady': 5}
+
+        # 区块 A: PDF 合并
+        group_merge = ttk.LabelFrame(frame, text="🏭 PDF 合并工厂", padding=10)
+        group_merge.pack(fill="both", expand=True, **pad)
+
+        list_frame = ttk.Frame(group_merge)
+        list_frame.pack(fill="both", expand=True)
+        sb_merge = ttk.Scrollbar(list_frame)
+        sb_merge.pack(side="right", fill="y")
+        self.mg_list = tk.Listbox(list_frame, selectmode="extended", height=8, yscrollcommand=sb_merge.set,
+                                  font=("Consolas", 9))
+        self.mg_list.pack(side="left", fill="both", expand=True)
+        sb_merge.config(command=self.mg_list.yview)
+
+        tb_merge = ttk.Frame(group_merge)
+        tb_merge.pack(fill="x", pady=5)
+        ttk.Button(tb_merge, text="➕ 添加文件", command=self.mg_add).pack(side="left", fill="x", expand=True, padx=2)
+        ttk.Button(tb_merge, text="➖ 删除选中", command=self.mg_del).pack(side="left", fill="x", expand=True, padx=2)
+        ttk.Separator(tb_merge, orient="vertical").pack(side="left", fill="y", padx=5)
+        ttk.Button(tb_merge, text="⬆️ 上移", command=self.mg_up).pack(side="left", padx=2)
+        ttk.Button(tb_merge, text="⬇️ 下移", command=self.mg_down).pack(side="left", padx=2)
+
+        ttk.Button(group_merge, text="🔗 开始合并为单文件", command=self.mg_start).pack(fill="x", pady=(5, 0))
+
+        # 区块 B: 智能分割
+        group_split = ttk.LabelFrame(frame, text="✂️ 智能分割与统计", padding=10)
+        group_split.pack(fill="x", **pad)
+
+        row_src = ttk.Frame(group_split)
+        row_src.pack(fill="x", pady=5)
+        ttk.Label(row_src, text="源文件:").pack(side="left")
+        ttk.Entry(row_src, textvariable=self.tl_file).pack(side="left", fill="x", expand=True, padx=5)
+        ttk.Button(row_src, text="📂 浏览",
+                   command=lambda: self.tl_file.set(filedialog.askopenfilename(filetypes=[("PDF", "*.pdf")]))).pack(
+            side="left")
+
+        row_panel = ttk.Frame(group_split)
+        row_panel.pack(fill="x", pady=10)
+
+        f_stat = ttk.Labelframe(row_panel, text="基础信息", padding=5)
+        f_stat.pack(side="left", fill="both", expand=True, padx=(0, 5))
+        ttk.Button(f_stat, text="📊 统计页数与字数", command=self.tl_count_words).pack(fill="x", pady=5)
+
+        f_strat = ttk.Labelframe(row_panel, text="分割策略", padding=5)
+        f_strat.pack(side="right", fill="both", expand=True, padx=(5, 0))
+
+        r_toc = ttk.Radiobutton(f_strat, text="按目录章节分割 (推荐)", variable=self.tl_mode, value="toc",
+                                command=self._update_ui_state)
+        r_toc.pack(anchor="w", pady=2)
+
+        f_word = ttk.Frame(f_strat)
+        f_word.pack(anchor="w", pady=2)
+        r_word = ttk.Radiobutton(f_word, text="按字数分割 | 每", variable=self.tl_mode, value="word",
+                                 command=self._update_ui_state)
+        r_word.pack(side="left")
+        self.ent_limit = ttk.Spinbox(f_word, from_=0.1, to=50.0, increment=0.5, textvariable=self.tl_word_limit,
+                                     width=5)
+        self.ent_limit.pack(side="left", padx=2)
+        ttk.Label(f_word, text="万字").pack(side="left")
+
+        ttk.Button(group_split, text="🚀 执行分割", command=self.tl_run_split).pack(fill="x", pady=5)
+
+        self.tl_log = tk.Text(group_split, height=6, font=("Consolas", 8), fg="#333")
+        self.tl_log.pack(fill="x", pady=5)
+
+    def _update_ui_state(self):
+        if self.tl_mode.get() == "word":
+            self.ent_limit.config(state="normal")
+        else:
+            self.ent_limit.config(state="disabled")
+
+    def tl_log_msg(self, msg):
+        self.root.after(0, lambda: self.tl_log.insert("end",
+                                                      f"[{datetime.datetime.now().strftime('%H:%M:%S')}] {msg}\n") or self.tl_log.see(
+            "end"))
+
+    # --- Tab 2 逻辑 ---
     def mg_add(self):
         files = filedialog.askopenfilenames(filetypes=[("PDF", "*.pdf")])
         for f in files: self.mg_files.append(f); self.mg_list.insert("end", os.path.basename(f))
 
     def mg_del(self):
-        for i in reversed(self.mg_list.curselection()): self.mg_list.delete(i); del self.mg_files[i]
+        sel = list(self.mg_list.curselection());
+        sel.sort(reverse=True)
+        for i in sel: self.mg_list.delete(i); del self.mg_files[i]
+
+    def mg_up(self):
+        sel = self.mg_list.curselection()
+        if not sel: return
+        for i in sel:
+            if i == 0: continue
+            text = self.mg_list.get(i);
+            file = self.mg_files[i]
+            self.mg_list.delete(i);
+            self.mg_files.pop(i)
+            self.mg_list.insert(i - 1, text);
+            self.mg_files.insert(i - 1, file)
+            self.mg_list.selection_set(i - 1)
+
+    def mg_down(self):
+        sel = list(self.mg_list.curselection());
+        sel.sort(reverse=True)
+        if not sel: return
+        for i in sel:
+            if i == len(self.mg_files) - 1: continue
+            text = self.mg_list.get(i);
+            file = self.mg_files[i]
+            self.mg_list.delete(i);
+            self.mg_files.pop(i)
+            self.mg_list.insert(i + 1, text);
+            self.mg_files.insert(i + 1, file)
+            self.mg_list.selection_set(i + 1)
 
     def mg_start(self):
-        if not self.mg_files: return messagebox.showwarning("空", "最少2个文件")
+        if len(self.mg_files) < 2: return messagebox.showwarning("提示", "请至少添加 2 个文件")
         out = filedialog.asksaveasfilename(defaultextension=".pdf", filetypes=[("PDF", "*.pdf")])
-        if out: threading.Thread(target=self.mg_run, args=(out,)).start()
+        if out:
+            self.tl_log_msg("正在合并...")
+            threading.Thread(target=self.mg_run, args=(out,)).start()
 
     def mg_run(self, out):
-        ok, p = PDFMergerEngine().merge(self.mg_files, out, lambda c, t, m: self.tl_log_msg(f"合并: {m}"))
-        self.tl_log_msg(f"完成: {p}" if ok else "失败")
+        eng = PDFMergerEngine()
+        ok, path = eng.merge(self.mg_files, out, lambda c, t, m: self.tl_log_msg(f"合并: {m}"))
+        self.tl_log_msg(f"✅ 合并完成: {os.path.basename(path)}" if ok else "❌ 失败")
 
     def tl_count_words(self):
-        src = self.tl_file.get();
-        if not src: return
-        self.tl_log_msg("正在统计...")
+        if self.is_counting: return  # 防双击
+        src = self.tl_file.get()
+        if not src: return messagebox.showwarning("提示", "请选择源文件")
+
+        self.is_counting = True
+        self.tl_log_msg("正在分析全文字数...")
 
         def run():
-            ok, p, c = PDFSplitterEngine(CallbackManager(None, None, self.tl_log_msg)).get_pdf_info(src)
-            if ok: self.tl_log_msg(f"页数: {p} | 字数: {c}")
+            try:
+                cb = CallbackManager(None, None, self.tl_log_msg)
+                ok, p, c = PDFSplitterEngine(cb).get_pdf_info(src)
+                if ok:
+                    self.tl_log_msg(f"📊 统计报告: 共 {p} 页 | 约 {c} 字符")
+                else:
+                    self.tl_log_msg(f"❌ 统计失败: {c}")
+            finally:
+                self.is_counting = False
 
         threading.Thread(target=run).start()
 
-    def tl_split_toc(self):
-        src = self.tl_file.get();
-        if not src: return
-        toc = PDFSplitterEngine().get_toc(src)
-        if not toc: return messagebox.showinfo("无目录", "无目录")
-        top = tk.Toplevel(self.root);
-        lb = tk.Listbox(top, selectmode="multiple");
-        lb.pack(fill="both", expand=True)
-        for t, p in toc: lb.insert("end", f"P{p}|{t}")
+    def tl_run_split(self):
+        src = self.tl_file.get()
+        if not src: return messagebox.showwarning("提示", "请选择源文件")
 
-        def go():
-            sel = lb.curselection();
-            top.destroy()
-            if not sel: return
-            tgt = os.path.join(os.path.dirname(src), os.path.splitext(os.path.basename(src))[0] + "_拆分");
+        mode = self.tl_mode.get()
+
+        if mode == "toc":
+            toc = PDFSplitterEngine().get_toc(src)
+            if not toc: return messagebox.showinfo("无目录", "该 PDF 没有目录信息。")
+
+            top = tk.Toplevel(self.root);
+            top.title("选择导出章节")
+            top.geometry("400x500")
+
+            lb = tk.Listbox(top, selectmode="multiple", font=("Consolas", 9))
+            lb.pack(fill="both", expand=True, padx=5, pady=5)
+            for t, p in toc: lb.insert("end", f"P{p} | {t}")
+
+            def confirm():
+                sel = lb.curselection();
+                top.destroy()
+                if not sel: return
+                tgt = os.path.join(os.path.dirname(src), os.path.splitext(os.path.basename(src))[0] + "_章节拆分")
+                os.makedirs(tgt, exist_ok=True)
+
+                self.tl_log_msg(f"正在准备按选定切割点分卷...")
+                # 使用线程包装器来处理结束反馈
+                threading.Thread(target=lambda: self._run_split_toc(src, sel, tgt)).start()
+
+            ttk.Button(top, text="确认分割点", command=confirm).pack(pady=10)
+
+        elif mode == "word":
+            try:
+                limit_w = float(self.tl_word_limit.get())
+                if limit_w <= 0: raise ValueError
+            except:
+                return messagebox.showerror("错误", "请输入有效的字数阈值")
+
+            threshold = int(limit_w * 10000)
+            tgt = os.path.join(os.path.dirname(src),
+                               os.path.splitext(os.path.basename(src))[0] + f"_字数拆分_{limit_w}w")
             os.makedirs(tgt, exist_ok=True)
-            threading.Thread(
-                target=lambda: PDFSplitterEngine(CallbackManager(None, None, self.tl_log_msg)).split_by_toc_indices(src,
-                                                                                                                    sel,
-                                                                                                                    tgt)).start()
 
-        ttk.Button(top, text="导出", command=go).pack()
+            self.tl_log_msg(f"正在执行字数分割 (阈值: {threshold}字)...")
+            threading.Thread(target=lambda: self._run_split_word(src, threshold, tgt)).start()
+
+    # [v3.7.1] 新增的线程包装函数，用于输出结束日志
+    def _run_split_toc(self, src, sel, tgt):
+        cb = CallbackManager(None, None, self.tl_log_msg)
+        ok, msg = PDFSplitterEngine(cb).split_by_toc_indices(src, sel, tgt)
+        self.tl_log_msg(f">>> {msg}")  # 输出总结
+
+    def _run_split_word(self, src, threshold, tgt):
+        cb = CallbackManager(None, None, self.tl_log_msg)
+        ok, msg = PDFSplitterEngine(cb).split_by_word_count(src, threshold, tgt)
+        self.tl_log_msg(f">>> {msg}")  # 输出总结
