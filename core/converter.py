@@ -1,12 +1,11 @@
 # core/converter.py
-# Version: v3.5.1_Density_Check
+# Version: v3.6.1_Final_Lite
 # Last Updated: 2026-01-06
-# Description: 引入密度检测算法，修复臃肿文件误判问题；移除物理切割冗余逻辑。
+# Description: 移除所有冗余的ETA时间计算代码；保留密度检测；仅专注于转换核心逻辑。
 
 import os
 import time
 import tempfile
-import datetime
 import shutil
 import ebooklib
 from ebooklib import epub
@@ -29,9 +28,8 @@ class ConverterEngine:
         self.stop_flag = False
 
     # =========================================================================
-    # [v3.5.1 新增] 密度检测算法
+    # [v3.5.1] 密度检测算法 (保留)
     # 核心逻辑：计算“平均每个物理文件包含多少个章节”。
-    # 阈值设定：5。如果平均每个HTML文件包含超过5个章节，说明结构极度臃肿。
     # =========================================================================
     @staticmethod
     def analyze_structure(epub_path):
@@ -39,7 +37,6 @@ class ConverterEngine:
             book = epub.read_epub(epub_path, options={'ignore_ncx': False})
             toc_count = len(book.toc)
 
-            # 统计物理文件去重数
             unique_files = set()
             for node in book.toc:
                 href = ""
@@ -50,21 +47,16 @@ class ConverterEngine:
                 if href: unique_files.add(href.split('#')[0])
 
             file_count = len(unique_files)
-            if file_count == 0: file_count = 1  # 防止除以零
+            if file_count == 0: file_count = 1
 
-            # 计算密度：章节数 / 文件数
             density = toc_count / file_count
-
-            # 判定：密度 > 5 或者文件数极少，都视为单体/臃肿
             is_monolithic = (density > 5.0) or (toc_count > 50 and file_count < 5)
 
             report = (
-                f"📊 结构深度分析 (v3.5.1):\n"
-                f"----------------\n"
-                f"• 逻辑章节数: {toc_count}\n"
-                f"• 物理文件数: {file_count}\n"
-                f"• 内容密度值: {density:.2f} (阈值: 5.0)\n"
-                f"• 结构判定: {'⚠️ 结构臃肿/单体' if is_monolithic else '✅ 结构规范/散列'}\n"
+                f"📊 结构深度分析:\n"
+                f"• 逻辑章节: {toc_count} | 物理文件: {file_count}\n"
+                f"• 内容密度: {density:.2f} (阈值: 5.0)\n"
+                f"• 判定结果: {'⚠️ 结构臃肿/单体' if is_monolithic else '✅ 结构规范/散列'}"
             )
             return is_monolithic, report
         except Exception as e:
@@ -78,6 +70,7 @@ class ConverterEngine:
         if self.stop_flag: raise InterruptedError("用户手动中止")
 
     def run(self):
+        # start_time 仅用于最终日志的简要耗时记录，不参与逻辑控制
         start_time = time.time()
         self.stop_flag = False
         try:
@@ -85,7 +78,6 @@ class ConverterEngine:
             mode = self.settings.get('mode', 'auto')
 
             self.cb.log(f"开始任务: {os.path.basename(self.epub_path)}")
-            self.cb.log(f"当前策略: {mode}")
             self._check_stop()
 
             is_split_mode = False
@@ -102,8 +94,7 @@ class ConverterEngine:
             cleanup_path = None
 
             if is_split_mode:
-                # 只有通过了预检的“规范文件”才会走到这里
-                self.cb.log(">>> 执行标准分卷逻辑 (适用于规范结构)...")
+                self.cb.log(">>> 执行标准分卷逻辑...")
                 success, files, folder = self.convert_split_mode()
 
                 if success and self.settings.get('auto_merge', True):
@@ -112,6 +103,7 @@ class ConverterEngine:
                     merger = PDFMergerEngine()
                     merge_out = os.path.join(os.path.dirname(self.epub_path),
                                              f"{os.path.splitext(os.path.basename(self.epub_path))[0]}_全本.pdf")
+                    # 合并进度条
                     ok, path = merger.merge(files, merge_out,
                                             lambda c, t, m: self.cb.update_progress(90 + int(c / t * 10), m))
                     if ok:
@@ -125,7 +117,7 @@ class ConverterEngine:
                     result_msg = "分卷已生成"
                     final_path = folder
             else:
-                self.cb.log(">>> 执行单文件逻辑 (适用于臃肿/小型结构)...")
+                self.cb.log(">>> 执行单文件逻辑...")
                 success, msg = self.convert_single_mode()
                 result_msg = msg
                 final_path = self.output_path
@@ -139,9 +131,10 @@ class ConverterEngine:
         except Exception as e:
             return False, str(e), "0分0秒", "", None
 
-    # === 单文件模式 (标准) ===
+    # === 单文件模式 ===
     def convert_single_mode(self):
         try:
+            # 这里的 start_t 仅用于控制台微观日志，不影响核心
             start_t = time.time()
             self.cb.update_progress(10, "读取 EPUB...")
             book = epub.read_epub(self.epub_path)
@@ -165,7 +158,7 @@ class ConverterEngine:
                         if c: full_html.append(c)
                     if i % 10 == 0:
                         elapsed = int(time.time() - start_t)
-                        self.cb.update_progress(30 + int(i / total * 30), f"解析中 {i}/{total} | 耗时: {elapsed}s")
+                        self.cb.update_progress(30 + int(i / total * 30), f"解析中 {i}/{total}")
 
                 self.cb.log("生成排版 (CSS)...")
                 final_html = f"<html><body>{''.join(full_html)}</body></html>"
@@ -183,7 +176,8 @@ class ConverterEngine:
         except Exception as e:
             raise e
 
-    # === 分卷模式 (标准 - 仅用于规范文件) ===
+    # === 分卷模式 (v3.6.1 极致精简版) ===
+    # 删除了所有 ETA 计算代码，进度条只显示处理对象
     def convert_split_mode(self):
         try:
             epub_dir = os.path.dirname(self.epub_path)
@@ -195,7 +189,6 @@ class ConverterEngine:
             if not book.toc: return False, [], None
 
             generated = []
-            start_time = time.time()
 
             with tempfile.TemporaryDirectory() as temp_dir:
                 self._extract_images_and_build_manifest(book, temp_dir)
@@ -206,13 +199,10 @@ class ConverterEngine:
                 for idx, node in enumerate(book.toc):
                     self._check_stop()
 
-                    elapsed = time.time() - start_time
-                    avg = elapsed / (idx + 1)
-                    eta = str(datetime.timedelta(seconds=int(avg * (total - idx))))
-
+                    # [精简] 移除所有时间计算，只保留进度百分比和标题
                     title = node.title if hasattr(node, 'title') else node[0].title
                     safe_title = sanitize_filename(title)
-                    self.cb.update_progress(int((idx / total) * 90), f"处理: {safe_title} | ETA: {eta}")
+                    self.cb.update_progress(int((idx / total) * 90), f"处理: {safe_title}")
 
                     hrefs = self._find_all_hrefs(node)
                     chapter_html = []
@@ -252,7 +242,6 @@ class ConverterEngine:
     def _clean_and_fix_html(self, item, temp_dir, anchor_id=None):
         if not item: return None
         soup = BeautifulSoup(item.get_content(), 'html.parser')
-        # 简单清洗
         for img in soup.find_all('img'):
             src = img.get('src')
             if src:
