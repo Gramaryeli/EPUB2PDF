@@ -4,18 +4,18 @@
 # Description: 移除所有冗余的ETA时间计算代码；保留密度检测；仅专注于转换核心逻辑。
 
 import os
-import time
 import tempfile
-import shutil
+import time
+
 import ebooklib
-from ebooklib import epub
 from bs4 import BeautifulSoup
+from ebooklib import epub
 from weasyprint import HTML, CSS
 from weasyprint.text.fonts import FontConfiguration
 
-from config import LARGE_FILE_THRESHOLD_MB, APP_VERSION
-from utils.helpers import sanitize_filename
+from config import LARGE_FILE_THRESHOLD_MB
 from core.merger import PDFMergerEngine
+from utils.helpers import sanitize_filename
 
 
 class ConverterEngine:
